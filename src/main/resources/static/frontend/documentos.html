@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentos - SSOMA</title>
+</head>
+<body>
+<h1>Gestión de Documentos</h1>
+
+<nav>
+    <a href="index.html">Inicio</a> |
+    <a href="empresas.html">Empresas</a> |
+    <a href="documentos.html">Documentos</a>
+</nav>
+
+<!-- Formulario -->
+<h2>Crear/Editar Documento</h2>
+<form id="documentoForm">
+    <input type="hidden" id="documentoId">
+
+    <label>Empresa:</label>
+    <select id="empresaId" required>
+        <option value="">Seleccione empresa</option>
+    </select><br><br>
+
+    <label>Nombre Documento:</label>
+    <input type="text" id="nombreDocumento" required><br><br>
+
+    <label>Fecha Vencimiento:</label>
+    <input type="date" id="fechaVencimiento"><br><br>
+
+    <label>URL Documento:</label>
+    <input type="url" id="documentoUrl" placeholder="https://..."><br><br>
+
+    <button type="submit">Guardar</button>
+    <button type="button" onclick="limpiarForm()">Limpiar</button>
+</form>
+
+<!-- Filtros simples -->
+<h2>Filtros</h2>
+<label>Filtrar por empresa:</label>
+<select id="filtroEmpresa" onchange="filtrarDocumentos()">
+    <option value="">Todas las empresas</option>
+</select>
+
+<button onclick="mostrarVencidos()">Ver Vencidos</button>
+<button onclick="mostrarPorVencer()">Ver Por Vencer</button>
+<button onclick="cargarDocumentos()">Ver Todos</button>
+
+<!-- Lista -->
+<h2>Lista de Documentos</h2>
+
+<table border="1">
+    <thead>
+    <tr>
+        <th>Empresa</th>
+        <th>Documento</th>
+        <th>Fecha Vencimiento</th>
+        <th>Estado</th>
+        <th>Acciones</th>
+    </tr>
+    </thead>
+    <tbody id="documentosTable">
+    <tr><td colspan="5">Cargando...</td></tr>
+    </tbody>
+</table>
+
+<script>
+    const API_URL = 'http://localhost:8083/api/v1';
+    let editando = false;
+    let empresas = [];
+
+    // Cargar al inicio
+    window.onload = function() {
+        cargarEmpresas();
+        cargarDocumentos();
+
+        document.getElementById('documentoForm').onsubmit = function(e) {
+            e.preventDefault();
+            guardarDocumento();
+        };
+    };
+
+    async function cargarEmpresas() {
+        try {
+            const response = await fetch(`${API_URL}/empresas`);
+            const data = await response.json();
+
+            if (data.success) {
+                empresas = data.data;
+
+                // Llenar selects
+                const selectEmpresa = document.getElementById('empresaId');
+                const filtroEmpresa = document.getElementById('filtroEmpresa');
+
+                empresas.forEach(empresa => {
+                    const option1 = new Option(empresa.razon_social, empresa.empresa_id);
+                    const option2 = new Option(empresa.razon_social, empresa.empresa_id);
+                    selectEmpresa.add(option1);
+                    filtroEmpresa.add(option2);
+                });
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    async function cargarDocumentos() {
+        try {
+            // Como no hay endpoint para todos los documentos, vamos por empresa
+            let todosDocumentos = [];
+
+            for (const empresa of empresas) {
+                const response = await fetch(`${API_URL}/documentos-empresa/empresa/${empresa.empresa_id}`);
+                const data = await response.json();
+
+                if (data.success && data.data) {
+                    todosDocumentos = todosDocumentos.concat(data.data);
+                }
+            }
+
+            mostrarDocumentos(todosDocumentos);
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error cargando documentos');
+        }
+    }
+
+    function mostrarDocumentos(documentos) {
+        const tbody = document.getElementById('documentosTable');
+
+        if (documentos.length > 0) {
+            tbody.innerHTML = documentos.map(doc => {
+                const empresa = empresas.find(e => e.empresa_id === doc.empresa_id);
+                const empresaNombre = empresa ? empresa.razon_social : 'N/A';
+                const estado = getEstado(doc.fecha_vencimiento);
+
+                return `
+                    <tr>
+                        <td>${empresaNombre}</td>
+                        <td>${doc.nombre_documento}</td>
+                        <td>${doc.fecha_vencimiento || '-'}</td>
+                        <td>${estado}</td>
+                        <td>
+                            <button onclick="editarDocumento('${doc.documento_empresa_id}')">Editar</button>
+                            <button onclick="eliminarDocumento('${doc.documento_empresa_id}')">Eliminar</button>
+                            ${doc.documento_url ? `<a href="${doc.documento_url}" target="_blank">Ver</a>` : ''}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5">No hay documentos</td></tr>';
+        }
+    }
+
+    function getEstado(fechaVencimiento) {
+        if (!fechaVencimiento) return 'Sin fecha';
+
+        const hoy = new Date();
+        const vencimiento = new Date(fechaVencimiento);
+
+        if (vencimiento < hoy) return '🔴 Vencido';
+
+        const dias = Math.ceil((vencimiento - hoy) / (1000 * 60 * 60 * 24));
+        if (dias <= 30) return '🟡 Por vencer';
+
+        return '🟢 Vigente';
+    }
+
+    async function guardarDocumento() {
+        const documento = {
+            empresa_id: document.getElementById('empresaId').value,
+            nombre_documento: document.getElementById('nombreDocumento').value,
+            fecha_vencimiento: document.getElementById('fechaVencimiento').value || null,
+            documento_url: document.getElementById('documentoUrl').value || null
+        };
+
+        try {
+            let response;
+            if (editando) {
+                const id = document.getElementById('documentoId').value;
+                response = await fetch(`${API_URL}/documentos-empresa/${id}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(documento)
+                });
+            } else {
+                response = await fetch(`${API_URL}/documentos-empresa`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(documento)
+                });
+            }
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert(editando ? 'Documento actualizado' : 'Documento creado');
+                limpiarForm();
+                cargarDocumentos();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error guardando documento');
+        }
+    }
+
+    async function editarDocumento(id) {
+        try {
+            const response = await fetch(`${API_URL}/documentos-empresa/${id}`);
+            const data = await response.json();
+
+            if (data.success) {
+                const doc = data.data;
+                document.getElementById('documentoId').value = doc.documento_empresa_id;
+                document.getElementById('empresaId').value = doc.empresa_id;
+                document.getElementById('nombreDocumento').value = doc.nombre_documento || '';
+                document.getElementById('fechaVencimiento').value = doc.fecha_vencimiento || '';
+                document.getElementById('documentoUrl').value = doc.documento_url || '';
+
+                editando = true;
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error cargando documento');
+        }
+    }
+
+    async function eliminarDocumento(id) {
+        if (confirm('¿Eliminar documento?')) {
+            try {
+                const response = await fetch(`${API_URL}/documentos-empresa/${id}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('Documento eliminado');
+                    cargarDocumentos();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error eliminando documento');
+            }
+        }
+    }
+
+    async function filtrarDocumentos() {
+        const empresaId = document.getElementById('filtroEmpresa').value;
+
+        if (empresaId) {
+            try {
+                const response = await fetch(`${API_URL}/documentos-empresa/empresa/${empresaId}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    mostrarDocumentos(data.data);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        } else {
+            cargarDocumentos();
+        }
+    }
+
+    async function mostrarVencidos() {
+        try {
+            const response = await fetch(`${API_URL}/documentos-empresa/vencidos`);
+            const data = await response.json();
+
+            if (data.success) {
+                mostrarDocumentos(data.data);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    async function mostrarPorVencer() {
+        try {
+            const response = await fetch(`${API_URL}/documentos-empresa/por-vencer?diasAnticipacion=30`);
+            const data = await response.json();
+
+            if (data.success) {
+                mostrarDocumentos(data.data);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    function limpiarForm() {
+        document.getElementById('documentoForm').reset();
+        document.getElementById('documentoId').value = '';
+        editando = false;
+    }
+</script>
+</body>
+</html>

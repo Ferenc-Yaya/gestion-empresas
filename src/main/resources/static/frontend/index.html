@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión de Empresas - SSOMA</title>
+</head>
+<body>
+<h1>Sistema de Gestión de Empresas</h1>
+
+<nav>
+    <a href="index.html">Inicio</a> |
+    <a href="empresas.html">Empresas</a> |
+    <a href="documentos.html">Documentos</a>
+</nav>
+
+<h2>Menú Principal</h2>
+<ul>
+    <li><a href="empresas.html">Gestionar Empresas</a></li>
+    <li><a href="documentos.html">Gestionar Documentos</a></li>
+</ul>
+
+<div id="stats">
+    <h3>Resumen</h3>
+    <p>Total Empresas: <span id="totalEmpresas">-</span></p>
+    <p>Total Documentos: <span id="totalDocumentos">-</span></p>
+</div>
+
+<script src="app.js"></script>
+<script>
+    // Cargar estadísticas básicas
+    window.onload = async function() {
+        try {
+            const empresas = await fetch('http://localhost:8083/api/v1/empresas');
+            const empresasData = await empresas.json();
+            document.getElementById('totalEmpresas').textContent = empresasData.data?.length || 0;
+
+            // Para documentos necesitarías un endpoint que traiga todos
+            document.getElementById('totalDocumentos').textContent = '-';
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    };
+</script>
+</body>
+</html>
