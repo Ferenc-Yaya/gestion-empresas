@@ -18,6 +18,12 @@ spring:
     serialization:
       write-dates-as-timestamps: false
     date-format: yyyy-MM-dd
+  # Configuración para subida de archivos
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+      enabled: true
 
 server:
   port: 8083
@@ -34,3 +40,7 @@ logging:
   level:
     com.ssoma: DEBUG
     org.springdoc: DEBUG
+
+app:
+  upload:
+    dir: uploads

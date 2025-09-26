@@ -28,12 +28,16 @@
     <input type="text" id="nombreDocumento" required><br><br>
 
     <label>Fecha Vencimiento:</label>
-    <input type="date" id="fechaVencimiento"><br><br>
+    <input type="date" id="fechaVencimiento" required><br><br>
 
     <label>URL Documento:</label>
     <input type="url" id="documentoUrl" placeholder="https://..."><br><br>
 
-    <button type="submit">Guardar</button>
+    <label>Subir Archivo:</label>
+    <input type="file" id="archivoInput" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
+    <div id="archivoInfo" style="margin-top: 5px; font-size: 12px; color: #666;"></div><br><br>
+
+    <button type="submit" id="btnGuardar">Guardar</button>
     <button type="button" onclick="limpiarForm()">Limpiar</button>
 </form>
 
@@ -58,11 +62,12 @@
         <th>Documento</th>
         <th>Fecha Vencimiento</th>
         <th>Estado</th>
+        <th>Archivo</th>
         <th>Acciones</th>
     </tr>
     </thead>
     <tbody id="documentosTable">
-    <tr><td colspan="5">Cargando...</td></tr>
+    <tr><td colspan="6">Cargando...</td></tr>
     </tbody>
 </table>
 
@@ -80,7 +85,29 @@
             e.preventDefault();
             guardarDocumento();
         };
+
+        // Mostrar info del archivo seleccionado
+        document.getElementById('archivoInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const archivoInfo = document.getElementById('archivoInfo');
+
+            if (file) {
+                archivoInfo.innerHTML = `📎 Archivo seleccionado: ${file.name} (${formatBytes(file.size)})`;
+                archivoInfo.style.color = '#666';
+            } else {
+                archivoInfo.innerHTML = '';
+            }
+        });
     };
+
+    function formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
 
     async function cargarEmpresas() {
         try {
@@ -108,7 +135,6 @@
 
     async function cargarDocumentos() {
         try {
-            // Como no hay endpoint para todos los documentos, vamos por empresa
             let todosDocumentos = [];
 
             for (const empresa of empresas) {
@@ -136,22 +162,35 @@
                 const empresaNombre = empresa ? empresa.razon_social : 'N/A';
                 const estado = getEstado(doc.fecha_vencimiento);
 
+                // Determinar si es archivo local o URL externa
+                let archivoInfo = '-';
+                if (doc.documento_url) {
+                    if (doc.documento_url.includes('/archivos/download/')) {
+                        // Es un archivo subido localmente
+                        const fileName = doc.documento_url.split('/').pop();
+                        archivoInfo = `<a href="${doc.documento_url}" target="_blank">📄 ${fileName}</a>`;
+                    } else {
+                        // Es una URL externa
+                        archivoInfo = `<a href="${doc.documento_url}" target="_blank">🔗 URL</a>`;
+                    }
+                }
+
                 return `
                     <tr>
                         <td>${empresaNombre}</td>
                         <td>${doc.nombre_documento}</td>
                         <td>${doc.fecha_vencimiento || '-'}</td>
                         <td>${estado}</td>
+                        <td>${archivoInfo}</td>
                         <td>
                             <button onclick="editarDocumento('${doc.documento_empresa_id}')">Editar</button>
                             <button onclick="eliminarDocumento('${doc.documento_empresa_id}')">Eliminar</button>
-                            ${doc.documento_url ? `<a href="${doc.documento_url}" target="_blank">Ver</a>` : ''}
                         </td>
                     </tr>
                 `;
             }).join('');
         } else {
-            tbody.innerHTML = '<tr><td colspan="5">No hay documentos</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6">No hay documentos</td></tr>';
         }
     }
 
@@ -169,15 +208,71 @@
         return '🟢 Vigente';
     }
 
+    async function subirArchivoSiExiste() {
+        const fileInput = document.getElementById('archivoInput');
+        const file = fileInput.files[0];
+
+        if (!file) {
+            // No hay archivo seleccionado, retornar URL actual
+            return document.getElementById('documentoUrl').value || null;
+        }
+
+        // Validar tamaño (10MB)
+        if (file.size > 10 * 1024 * 1024) {
+            throw new Error('El archivo es muy grande. Máximo permitido: 10MB');
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        document.getElementById('archivoInfo').innerHTML = 'Subiendo archivo...';
+        document.getElementById('archivoInfo').style.color = '#666';
+
+        const response = await fetch(`${API_URL}/archivos/upload`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('archivoInfo').innerHTML =
+                `✅ Archivo subido: ${data.data.originalName}`;
+            document.getElementById('archivoInfo').style.color = 'green';
+
+            return `${API_URL}/archivos/download/${data.data.fileName}`;
+        } else {
+            throw new Error(data.message || 'Error subiendo archivo');
+        }
+    }
+
     async function guardarDocumento() {
-        const documento = {
-            empresa_id: document.getElementById('empresaId').value,
-            nombre_documento: document.getElementById('nombreDocumento').value,
-            fecha_vencimiento: document.getElementById('fechaVencimiento').value || null,
-            documento_url: document.getElementById('documentoUrl').value || null
-        };
+        const btnGuardar = document.getElementById('btnGuardar');
 
         try {
+            // Validar que haya URL o archivo
+            const documentoUrl = document.getElementById('documentoUrl').value;
+            const archivo = document.getElementById('archivoInput').files[0];
+
+            if (!documentoUrl && !archivo) {
+                alert('Debes proporcionar una URL del documento o subir un archivo');
+                return;
+            }
+
+            // Deshabilitar botón y mostrar que está procesando
+            btnGuardar.disabled = true;
+            btnGuardar.textContent = 'Guardando...';
+
+            // Subir archivo si existe
+            const finalDocumentoUrl = await subirArchivoSiExiste();
+
+            const documento = {
+                empresa_id: document.getElementById('empresaId').value,
+                nombre_documento: document.getElementById('nombreDocumento').value,
+                fecha_vencimiento: document.getElementById('fechaVencimiento').value,
+                documento_url: finalDocumentoUrl
+            };
+
             let response;
             if (editando) {
                 const id = document.getElementById('documentoId').value;
@@ -197,7 +292,7 @@
             const data = await response.json();
 
             if (data.success) {
-                alert(editando ? 'Documento actualizado' : 'Documento creado');
+                alert(editando ? 'Documento actualizado exitosamente' : 'Documento creado exitosamente');
                 limpiarForm();
                 cargarDocumentos();
             } else {
@@ -205,7 +300,13 @@
             }
         } catch (error) {
             console.error('Error:', error);
-            alert('Error guardando documento');
+            alert('Error guardando documento: ' + error.message);
+            document.getElementById('archivoInfo').innerHTML = '❌ Error: ' + error.message;
+            document.getElementById('archivoInfo').style.color = 'red';
+        } finally {
+            // Restaurar botón
+            btnGuardar.disabled = false;
+            btnGuardar.textContent = 'Guardar';
         }
     }
 
@@ -221,6 +322,14 @@
                 document.getElementById('nombreDocumento').value = doc.nombre_documento || '';
                 document.getElementById('fechaVencimiento').value = doc.fecha_vencimiento || '';
                 document.getElementById('documentoUrl').value = doc.documento_url || '';
+
+                // Mostrar info si hay archivo
+                if (doc.documento_url && doc.documento_url.includes('/archivos/download/')) {
+                    const fileName = doc.documento_url.split('/').pop();
+                    document.getElementById('archivoInfo').innerHTML =
+                        `📄 Archivo actual: ${fileName}`;
+                    document.getElementById('archivoInfo').style.color = 'blue';
+                }
 
                 editando = true;
             }
@@ -300,6 +409,8 @@
     function limpiarForm() {
         document.getElementById('documentoForm').reset();
         document.getElementById('documentoId').value = '';
+        document.getElementById('archivoInfo').innerHTML = '';
+        document.getElementById('archivoInput').value = '';
         editando = false;
     }
 </script>
